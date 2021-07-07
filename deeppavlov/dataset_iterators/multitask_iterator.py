@@ -14,8 +14,10 @@
 
 import copy
 import math
-from logging import getLogger
-from typing import Iterator, Optional, Tuple, Union
+from random import sample
+import numpy as np
+from logging import getLogger, info
+from typing import Iterator, List, Optional, Tuple, Union, Dict
 
 from deeppavlov.core.common.registry import register
 from deeppavlov.core.common.params import from_params
@@ -40,15 +42,21 @@ class MultiTaskIterator:
         data: dictionary of data with fields "train", "valid" and "test" (or some of them)
     """
 
-    def __init__(self, data: dict, tasks: dict):
+    def __init__(self, data: dict, num_train_epochs: int, steps_per_epoch: int, tasks: dict):
         self.task_iterators = {}
         for task_name, task_iterator_params in tasks.items():
             task_iterator_params = copy.deepcopy(task_iterator_params)
             task_iterator_params['class_name'] = task_iterator_params['iterator_class_name']
             del task_iterator_params['iterator_class_name']
-            self.task_iterators[task_name] = from_params(task_iterator_params, data=data[task_name])
-
+            self.task_iterators[task_name] = from_params(
+                task_iterator_params, data=data[task_name])
+        self.n_tasks = len(tasks.keys())
+        self.num_train_epochs = num_train_epochs
+        self.steps_per_epoch = steps_per_epoch
+        self.steps_done = 0
+        self.epochs_done = 0
         self.train = self._extract_data_type('train')
+        self.train_sizes = self._get_train_size(self.train)
         self.valid = self._extract_data_type('valid')
         self.test = self._extract_data_type('test')
         self.data = {
@@ -57,6 +65,21 @@ class MultiTaskIterator:
             'test': self.test,
             'all': self._unite_dataset_parts(self.train, self.valid, self.test)
         }
+
+    def _get_train_size(self, data: Dict[str, List]):
+        """
+        By the way the formula for the sample 
+        prob - in the best method - is N^(1-0.8*((epoch - 1)/(NUM_EPOCHS - 1))) 
+        so the sample prob is proportional to the number of train examples N
+        """
+        return [len(data[key]) for key in data.keys()]
+
+    def _get_probs(self):
+        alpha = 1.0 - 0.8 * self.epochs_done / (self.num_train_epochs)
+        probs = [p ** alpha for p in self.train_sizes]
+        tot = sum(probs)
+        probs = [p / tot for p in probs]
+        return probs
 
     def _extract_data_type(self, data_type):
         dataset_part = {}
@@ -91,23 +114,67 @@ class MultiTaskIterator:
             Element of inputs or outputs is a tuple which elements are x values of merged tasks in the order
             tasks are present in `tasks` argument of `__init__` method.
         """
-        max_task_data_len = max([len(iter_.data[data_type]) for iter_ in self.task_iterators.values()])
-
+        log.info(f"Train Sizes: {self.train_sizes} \n")
+        self.probs = self._get_probs()
+        log.info(f"Probs: {self.probs}  \n")
+        max_task_data_len = max([len(iter_.data[data_type])
+                                for iter_ in self.task_iterators.values()])
         size_of_last_batch = max_task_data_len % batch_size
         if size_of_last_batch == 0:
             size_of_last_batch = batch_size
 
-        n_batches = math.ceil(max_task_data_len / batch_size)
-        for task_batches in zip(
-                *[RepeatBatchGenerator(iter_, batch_size, data_type, shuffle, n_batches, size_of_last_batch) for 
-                  iter_ in self.task_iterators.values()]
-        ):
-            x_instances, y_instances = [], []
-            for task_batch in task_batches:
-                x_instances.append(task_batch[0])
-                y_instances.append(task_batch[1])
-            b = (tuple(zip(*x_instances)), tuple(zip(*y_instances)))
+        n_batches = math.ceil(self.num_train_epochs / batch_size)
+        generators = [RepeatBatchGenerator(iter_, batch_size, data_type, shuffle) for
+                      iter_ in self.task_iterators.values()]
+
+        # one sample batch for each task
+        iters = [iter_ for iter_ in self.task_iterators.values()]
+
+        sample_batch = [i.gen_batches(batch_size).__next__() for i in iters]
+        log.info(f"sample batch {sample_batch}")
+
+        x_instances = []
+        y_instances = []
+        for sample_task_batch in sample_batch:
+            x_instances.append(sample_task_batch[0])
+            y_instances.append(sample_task_batch[1])
+
+        for step in range(self.steps_per_epoch):
+            self.epochs_done = self.steps_done % self.steps_per_epoch
+            task_id = np.random.choice(self.n_tasks, p=self._get_probs())
+            batch = generators[task_id].__next__()
+            x_instances[task_id] = batch[0]
+            y_instances[task_id] = batch[1]
+            b = (self.add_task_id(task_id, x_instances), tuple(zip(*y_instances)))
+            self.steps_done += 1
+            # log.info(
+            #     f"probs = {self.probs} task_id = {task_id} batch x= {batch[0]} y = {batch[1]} \n"
+            #     f"x {b[0]} y {b[1]}"
+            #     f"step = {step} b = {b}\n"
+            #     )
             yield b
+        # for task_batches in zip(
+        #         *[RepeatBatchGenerator(iter_, batch_size, data_type, shuffle) for
+        #           iter_ in self.task_iterators.values()]
+        # ):
+        #     x_instances, y_instances = [], []
+        #     for task_batch in task_batches:
+        #         x_instances.append(task_batch[0])
+        #         y_instances.append(task_batch[1])
+        #     b = (tuple(zip(*x_instances)), tuple(zip(*y_instances)))
+        #     log.info(
+        #         f"b old = {b}")
+        #     yield b
+
+    def add_task_id(self, task_id, x_instances):
+        # print(task_id)
+        # print(x_instances)
+        x_in = []
+        for args in zip(*x_instances):
+            # print(*args)
+            x_in.append((task_id, *args))
+        # print(x_in)
+        return tuple(x_in)
 
     def get_instances(self, data_type: str = 'train'):
         """Returns a tuple of inputs and outputs from all datasets. Lengths of inputs and outputs are equal to
@@ -131,7 +198,7 @@ class MultiTaskIterator:
             y *= n_repeats
             x_instances.append(x[:max_task_data_len])
             y_instances.append(y[:max_task_data_len])
-            
+
         instances = (tuple(zip(*x_instances)), tuple(zip(*y_instances)))
         return instances
 
@@ -148,13 +215,14 @@ class RepeatBatchGenerator:
         n_batches: the number of batches that will be generated.
         size_of_the_last_batch: used if dataset size is not evenly divisible by batch size.
     """
+
     def __init__(
-            self, 
-            dataset_iterator: Union[MultiTaskIterator, DataLearningIterator], 
-            batch_size: int, 
-            data_type: str, 
-            shuffle: bool, 
-            n_batches: Optional[int] = None, 
+            self,
+            dataset_iterator: Union[MultiTaskIterator, DataLearningIterator],
+            batch_size: int,
+            data_type: str,
+            shuffle: bool,
+            n_batches: Optional[int] = None,
             size_of_last_batch: Optional[int] = None
     ):
         self.dataset_iterator = dataset_iterator
@@ -163,9 +231,11 @@ class RepeatBatchGenerator:
         self.shuffle = shuffle
         self.n_batches = n_batches
         self.size_of_last_batch = self.batch_size if size_of_last_batch is None else size_of_last_batch
-        
-        self.inner_batch_size = math.gcd(len(self.dataset_iterator.data[data_type]), batch_size)
-        self.gen = self.dataset_iterator.gen_batches(self.inner_batch_size, self.data_type, self.shuffle)
+
+        self.inner_batch_size = math.gcd(
+            len(self.dataset_iterator.data[data_type]), batch_size)
+        self.gen = self.dataset_iterator.gen_batches(
+            self.inner_batch_size, self.data_type, self.shuffle)
         self.batch_count = 0
 
     def __iter__(self):
@@ -179,7 +249,8 @@ class RepeatBatchGenerator:
             try:
                 xx, yy = next(self.gen)
             except StopIteration:
-                self.gen = self.dataset_iterator.gen_batches(self.inner_batch_size, self.data_type, self.shuffle)
+                self.gen = self.dataset_iterator.gen_batches(
+                    self.inner_batch_size, self.data_type, self.shuffle)
                 continue
             assert len(xx) == self.inner_batch_size and len(yy) == self.inner_batch_size, \
                 "self.inner_batch_size equals greatest common divisor of dataset size and " \
@@ -192,4 +263,3 @@ class RepeatBatchGenerator:
             x = x[:self.size_of_last_batch]
             y = y[:self.size_of_last_batch]
         return x, y
-
