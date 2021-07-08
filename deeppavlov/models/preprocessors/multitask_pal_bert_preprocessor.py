@@ -25,37 +25,21 @@ from deeppavlov.core.models.component import Component
 @register('multitask_pal_bert_preprocessor')
 class MultitaskPalBertPreprocessor(Component):
     """
-    One-hot featurizer with zero-padding.
-    If ``single_vector``, return the only vector per sample which can have several elements equal to ``1``.
-
-    Parameters:
-        depth: the depth for one-hotting
-        pad_zeros: whether to pad elements of batch with zeros
-        single_vector: whether to return one vector for the sample (sum of each one-hotted vectors)
+    Extracts out the task_id from the first index of each example for each task
     """
 
     def __init__(self, *args, **kwargs):
-        print(args, kwargs)
+        self.n_task = len(kwargs["in"])
 
     def __call__(self, *args):
-        # print("$$ARGS$$",args)
-        out = []
         task_id = None
-        for examples in zip(*args):
-            example_with_task_id = []
-            for task_no, task_example in enumerate(examples):
-                current_task_id = task_example[0]
-                if task_id is not None:
-                    if current_task_id != task_id:
-                        raise ValueError(f"Two task_ids found {current_task_id}, {task_id}"
-                        "One batch should not have multiple task_ids")
-                if task_no == 0:
-                    # index zero will be task_id
-                    task_id = current_task_id
-                    example_with_task_id = [task_id, *task_example[1:]] 
-                else:
-                    example_with_task_id.extend([*task_example[1:]])
-            out.append(tuple(example_with_task_id))
-        print("MultitaskPalBertPreprocessor", tuple(out))
-
-        return tuple(out)
+        out = []
+        for task_no in range(self.n_task):
+            examples = args[task_no]
+            task_data = []
+            for values in examples:
+                if task_id is None:
+                    task_id = values[0]
+                task_data.extend([*values[1:]])
+            out.append(tuple(task_data))
+        return [task_id, *out]
