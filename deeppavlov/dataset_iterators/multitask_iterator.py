@@ -131,7 +131,6 @@ class MultiTaskIterator:
         iters = [iter_ for iter_ in self.task_iterators.values()]
 
         sample_batch = [i.gen_batches(batch_size).__next__() for i in iters]
-        log.info(f"sample batch {sample_batch}")
 
         x_instances = []
         y_instances = []
@@ -150,8 +149,8 @@ class MultiTaskIterator:
             # log.info(
             #     f"probs = {self.probs} task_id = {task_id} batch x= {batch[0]} y = {batch[1]} \n"
             #     f"x {b[0]} y {b[1]}"
-            #     f"step = {step} b = {b}\n"
-            #     )
+                # f"step = {step} b = {b}\n"
+                # )
             yield b
         # for task_batches in zip(
         #         *[RepeatBatchGenerator(iter_, batch_size, data_type, shuffle) for
@@ -167,12 +166,13 @@ class MultiTaskIterator:
         #     yield b
 
     def add_task_id(self, task_id, x_instances):
-        # print(task_id)
-        # print(x_instances)
         x_in = []
-        for args in zip(*x_instances):
-            # print(*args)
-            x_in.append((task_id, *args))
+        for examples in zip(*x_instances):
+            # print(*task_examples)
+            task_examples = []
+            for task_example in examples:
+                task_examples.append((task_id, task_example))
+            x_in.append(tuple(task_examples))
         # print(x_in)
         return tuple(x_in)
 
