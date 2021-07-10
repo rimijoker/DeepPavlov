@@ -18,7 +18,7 @@
     }
   },
   "dataset_iterator": {
-    "class_name": "multitask_iterator",
+    "class_name": "multitask_pal_bert_iterator",
     "num_train_epochs": 5,
     "steps_per_epoch": 10,
     "tasks": {
@@ -147,8 +147,8 @@
     "batch_size": 32,
     "metrics": [
       {
-        "name": "roc_auc",
-        "inputs": ["y_onehot1", "y_insults1_pred_probas"]
+        "name": "multitask_accuracy",
+        "inputs": ["y_onehot1", "y_onehot2", "y_insults1_pred_probas", "y_insults2_pred_probas"]
       }
     ],
     "validation_patience": 2,
