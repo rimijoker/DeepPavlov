@@ -7,7 +7,7 @@
         "reader_class_name": "basic_classification_reader",
         "x": "Comment",
         "y": "Class",
-        "data_path": "/home/rimijoker/Desktop/insults_data_small"
+        "data_path": "/home/rimijoker/Desktop/insults_data"
       },
       "insults2": {
         "reader_class_name": "basic_classification_reader",
@@ -20,7 +20,7 @@
   "dataset_iterator": {
     "class_name": "multitask_iterator",
     "num_train_epochs": 5,
-    "steps_per_epoch": 2,
+    "steps_per_epoch": 10,
     "tasks": {
       "insults1": {
         "iterator_class_name": "basic_classification_iterator",
@@ -33,62 +33,42 @@
     }
   },
   "chainer": {
-    "in": [
-      "task_id",
-      "x_insults1",
-      "x_insults2"
-    ],
-    "in_y": [
-      "y_insults1",
-      "y_insults2"
-    ],
+    "in": ["x_with_id_insults1", "x_with_id_insults2"],
+    "in_y": ["y_insults1", "y_insults2"],
     "pipe": [
       {
-        "class_name": "torch_transformers_preprocessor",
-        "vocab_file": "bert-base-uncased",
-        "do_lower_case": true,
-        "max_seq_length": 64,
-        "in": [
-          "x_insults1"
-        ],
-        "out": [
-          "bert_features_insults1"
-        ]
+        "class_name": "multitask_pal_bert_preprocessor",
+        "in": ["x_with_id_insults1", "x_with_id_insults2"],
+        "out": ["task_id", "x_insults1", "x_insults2"]
       },
       {
         "class_name": "torch_transformers_preprocessor",
         "vocab_file": "bert-base-uncased",
         "do_lower_case": true,
         "max_seq_length": 64,
-        "in": [
-          "x_insults2"
-        ],
-        "out": [
-          "bert_features_insults2"
-        ]
+        "in": ["x_insults1"],
+        "out": ["bert_features_insults1"]
+      },
+      {
+        "class_name": "torch_transformers_preprocessor",
+        "vocab_file": "bert-base-uncased",
+        "do_lower_case": true,
+        "max_seq_length": 64,
+        "in": ["x_insults2"],
+        "out": ["bert_features_insults2"]
       },
       {
         "id": "classes_vocab1",
         "class_name": "simple_vocab",
-        "fit_on": [
-          "y_insults1"
-        ],
+        "fit_on": ["y_insults1"],
         "save_path": "/home/rimijoker/Desktop/dicts/classes1.dict",
         "load_path": "/home/rimijoker/Desktop/dicts/classes1.dict",
-        "in": [
-          "y_insults1"
-        ],
-        "out": [
-          "y_ids1"
-        ]
+        "in": ["y_insults1"],
+        "out": ["y_ids1"]
       },
       {
-        "in": [
-          "y_ids1"
-        ],
-        "out": [
-          "y_onehot1"
-        ],
+        "in": ["y_ids1"],
+        "out": ["y_onehot1"],
         "class_name": "one_hotter",
         "depth": "#classes_vocab1.len",
         "single_vector": true
@@ -96,25 +76,15 @@
       {
         "id": "classes_vocab2",
         "class_name": "simple_vocab",
-        "fit_on": [
-          "y_insults2"
-        ],
+        "fit_on": ["y_insults2"],
         "save_path": "/home/rimijoker/Desktop/dicts/classes2.dict",
         "load_path": "/home/rimijoker/Desktop/dicts/classes2.dict",
-        "in": [
-          "y_insults2"
-        ],
-        "out": [
-          "y_ids2"
-        ]
+        "in": ["y_insults2"],
+        "out": ["y_ids2"]
       },
       {
-        "in": [
-          "y_ids2"
-        ],
-        "out": [
-          "y_onehot2"
-        ],
+        "in": ["y_ids2"],
+        "out": ["y_onehot2"],
         "class_name": "one_hotter",
         "depth": "#classes_vocab2.len",
         "single_vector": true
@@ -124,72 +94,68 @@
         "class_name": "multitask_pal_bert",
         "config": "/home/rimijoker/DeepPavlov/deeppavlov/models/multitask_pal_bert/configs/pals_config.json",
         "pretrained_bert": "/home/rimijoker/Desktop/pal-bert-workspace/bert_base/pytorch_model.bin",
+        "steps_per_epoch": 10,
         "save_path": "/home/rimijoker/Desktop/dicts/model_save",
         "load_path": "/home/rimijoker/Desktop/dicts/model_load",
         "tasks": {
           "insults1": {
-            "labels": [
-              "0",
-              "1"
-            ]
+            "n_classes": "#classes_vocab1.len"
           },
           "insults2": {
-            "labels": [
-              "0",
-              "1"
-            ]
+            "n_classes": "#classes_vocab2.len"
           }
         },
         "in_distribution": {
           "insults1": 1,
           "insults2": 1
         },
-        "in": [
-          "task_id",
-          "bert_features_insults1",
-          "bert_features_insults2"
-        ],
+        "in": ["task_id", "bert_features_insults1", "bert_features_insults2"],
         "in_y_distribution": {
           "insults1": 1,
           "insults2": 1
         },
-        "in_y": [
-          "y_ids1",
-          "y_ids2"
-        ],
-        "out": [
-          "y_insults1_pred_probas",
-          "y_insults2_pred_probas"
-        ]
+        "in_y": ["y_ids1", "y_ids2"],
+        "out": ["y_insults1_pred_probas", "y_insults2_pred_probas"]
+      },
+      {
+        "in": "y_insults1_pred_probas",
+        "out": "y_insults1_pred_ids",
+        "class_name": "proba2labels",
+        "max_proba": true
+      },
+      {
+        "in": "y_insults1_pred_ids",
+        "out": "y_insults1_pred_labels",
+        "ref": "classes_vocab1"
+      },
+      {
+        "in": "y_insults2_pred_probas",
+        "out": "y_insults2_pred_ids",
+        "class_name": "proba2labels",
+        "max_proba": true
+      },
+      {
+        "in": "y_insults2_pred_ids",
+        "out": "y_insults2_pred_labels",
+        "ref": "classes_vocab2"
       }
     ],
-    "out": [
-      "y_insults1_pred_probas",
-      "y_insults2_pred_probas"
-    ]
+    "out": ["y_insults1_pred_labels", "y_insults2_pred_labels"]
   },
   "train": {
-    "epochs": 5
-    ,
-    "batch_size": 8,
+    "epochs": 5,
+    "batch_size": 32,
     "metrics": [
       {
-        "name": "accuracy",
-        "inputs": [
-          "y_insults1_pred_probas",
-          "y_insults2_pred_probas"
-        ]
+        "name": "roc_auc",
+        "inputs": ["y_onehot1", "y_insults1_pred_probas"]
       }
     ],
     "validation_patience": 2,
     "val_every_n_epochs": 1,
     "log_every_n_epochs": 1,
     "show_examples": false,
-    "evaluation_targets": [
-      "train",
-      "valid",
-      "test"
-    ],
+    "evaluation_targets": ["train", "valid", "test"],
     "class_name": "torch_trainer"
   }
 }
