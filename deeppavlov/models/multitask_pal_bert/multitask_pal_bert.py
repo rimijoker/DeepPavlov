@@ -198,7 +198,7 @@ class MultiTaskPalBert(TorchModel):
             self.model.bert.load_state_dict(update)
             log.info("Bert Model Weights Loaded.")
         else:
-            raise ConfigError("No pre-trained BERT model is given.")
+            log.warning("No pre-trained BERT model is given.")
 
         no_decay = ["bias", "gamma", "beta"]
         base = ["attn"]
@@ -363,14 +363,19 @@ class MultiTaskPalBert(TorchModel):
             elif self.tasks_type[task_id] in ["classification", "regression"]:
                 if self.tasks_type[task_id] == "regression":  # regression
                     pred = logits.squeeze(-1).detach().cpu().tolist()
-                if self.return_probas:
-                    pred = torch.nn.functional.sigmoid(logits, dim=-1)
+                elif self.return_probas:
+                    pred = torch.nn.functional.softmax(logits, dim=-1)
                     pred = pred.detach().cpu().numpy()
                 else:
                     logits = logits.detach().cpu().numpy()
                     pred = np.argmax(logits, axis=1)
             else:
                 raise NotImplementedError(f'Unsupported type {self.tasks_type[task_id]}')
+            try:
+                assert np.isfinite(pred).all()
+            except:
+                print('INFINITE PRED')
+                breakpoint()
             self.validation_predictions.append(pred)
         return self.validation_predictions
 
@@ -413,9 +418,14 @@ class MultiTaskPalBert(TorchModel):
                 # start and end logits
             _input["labels"] = [torch.tensor(label, dtype=torch.float32).to(self.device) for label in task_labels]
         else:
-            _input["labels"] = torch.tensor(
-                task_labels, dtype=torch.long).to(self.device)        
-
+            try:
+                _input["labels"] = torch.tensor(
+                    task_labels, dtype=torch.long).to(self.device)
+            except Exception as e:
+                print(f'CHECK TASK_LABELS {task_labels}')
+                print(e)
+                breakpoint()
+                raise e
         if self.tasks_type[task_id] == "sequence_labeling":
             #token to subtoken
             subtoken_labels = [token_labels_to_subtoken_labels(y_el, y_mask, input_mask)
@@ -428,14 +438,15 @@ class MultiTaskPalBert(TorchModel):
         loss, _ = self.model(
             task_id=task_id, name=self.tasks_type[task_id], **_input
         )
-
         loss = loss / self.gradient_accumulation_steps
         try:
             loss.backward()
         except RuntimeError:
-            raise ValueError(
-                f"More different classes found in task {self.task_names[task_id]} "
-                f"than {self.tasks_num_classes[task_id]}")
+            message = (f"More different classes found in task {self.task_names[task_id]} "
+                       f"than {self.tasks_num_classes[task_id]}")
+            print(message)
+            breakpoint()
+            raise ValueError(message)
 
         # Clip the norm of the gradients to 1.0.
         # This is to help prevent the "exploding gradients" problem.
@@ -450,6 +461,11 @@ class MultiTaskPalBert(TorchModel):
                 self.lr_scheduler.step()  # Update learning rate schedule
             self.optimizer.zero_grad()
         self.train_losses[task_id] = loss.item()
+        if not all([np.isfinite(s) or (type(s) == list and len(s)==0) for s in self.train_losses]):
+            print('NAN IN LOSSES FOUND!!!!!!!!!!!!!')
+            breakpoint()
+            raise Exception(f"Found NAN in losses {losses}")
+            
         self.steps_taken += 1
         return {"losses": self.train_losses}
 

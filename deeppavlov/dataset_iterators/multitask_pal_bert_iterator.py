@@ -24,6 +24,11 @@ from deeppavlov.core.data.data_learning_iterator import DataLearningIterator
 
 log = getLogger(__name__)
 
+
+def is_nan(x):
+       return any([len(x[0])>=2 and (x[0][0]!=x[0][0] or x[0][1]!=x[0][1]),
+               x[0]!=x[0], len(x)>2 and x[1]!=x[1]])
+
 @register('checker')
 class Checker:
     def __call__(self,*args,**kwargs):
@@ -44,6 +49,8 @@ class TupleSplitter:
         return [k[0] for k in args[0]],[k[1] for k in args[0]]
     def __init__(self, *args, **kwargs):
         pass
+ 
+
 @register('squad_bert_label_preparer')
 class TupleJoiner:
     '''
@@ -56,6 +63,8 @@ class TupleJoiner:
         return {'ans_start_squad': args[0], 'ans_end_squad': args[1]}
     def __init__(self, *args, **kwargs):
         pass
+
+
 @register('multitask_pal_bert_iterator')
 class MultiTaskPalBertIterator:
     """
@@ -102,6 +111,12 @@ class MultiTaskPalBertIterator:
             "valid": self._extract_data_type("valid"),
             "test": self._extract_data_type("test"),
         }
+        for type_ in self.data: 
+            for task in self.data[type_]:
+                for i in range(len(self.data[type_][task])-1,-1,-1):
+                    if is_nan(self.data[type_][task][i]):
+                       del self.data[type_][task][i]
+                       print('NAN CLEARED')
         print(f'Len {len(self.data["train"])}')
         #breakpoint()
         self.data["all"] = self._unite_dataset_parts(

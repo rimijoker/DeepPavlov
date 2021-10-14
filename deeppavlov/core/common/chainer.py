@@ -202,7 +202,8 @@ class Chainer(Component):
             self.train_pipe.append(((x_keys, in_x), out_params, component))
             out_params = lists_to_tuples(out_params)
             self.train_map = self.train_map.union(out_params)
-        else:
+
+        else:            
             raise ConfigError('Arguments {} are expected but only {} are set'.format(missing_names, self.train_map))
 
     def compute(self, x, y=None, targets=None):
