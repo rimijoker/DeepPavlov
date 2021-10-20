@@ -552,6 +552,9 @@ class BertForMultiTask(nn.Module):
             else:
                 return logits
         elif name == 'question_answering':
+            print('WARNING QA NOT SUPPORTED')
+            breakpoint()
+            assert False
             all_encoder_layers, _ = self.bert(input_ids, token_type_ids, attention_mask, task_id)
             sequence_output = all_encoder_layers[-1]
             logits = self.classifier[task_id](sequence_output)
@@ -585,6 +588,8 @@ class BertForMultiTask(nn.Module):
             if labels is not None:
                 if name != "regression":
                     loss_fct = CrossEntropyLoss()
+                    if len(labels.shape)==2:
+                        labels=torch.argmax(labels,1)
                     loss = loss_fct(logits, labels)
                     return loss, logits
                 elif  name == "regression":

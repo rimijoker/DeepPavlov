@@ -108,7 +108,9 @@ class BasicClassificationDatasetReader(DatasetReader):
                              prev_n_classes = len(label)
                          assert len(label) == prev_n_classes, f"Wrong class number at {i} row"
                      if float_labels:
-                         label = [float(k) for k in label]                      
+                         label = [float(k) for k in label] 
+                         if 0 in label:
+                             assert label.count(0) == len(label)-1,(row[y],file)                   
                      if sample == sample and label == label:  # not NAN
                          data[data_type].append((sample, label))
                      else:
